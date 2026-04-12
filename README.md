@@ -45,3 +45,14 @@ Unlike basic generators, this system:
 ---
 
 ## 🏗️ Architecture
+User Input
+↓
+GPT-2 Generator (multiple outputs)
+↓
+Sentiment Classifier (ML)
+↓
+Feedback-based Reranking
+↓
+Best Output
+↓
+User Feedback → Stored → Improves system
