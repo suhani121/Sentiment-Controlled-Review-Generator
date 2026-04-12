@@ -1,5 +1,3 @@
-# Sentiment-Controlled-Review-Generator
-
 # 🎬 Sentiment-Controlled Review Generator
 
 An end-to-end AI system that generates **movie reviews with controlled sentiment (positive/negative)** using GPT-2, enhanced with **ML-based sentiment reranking, user feedback learning, and an analytics dashboard**.
