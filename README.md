@@ -229,33 +229,4 @@ The built-in dashboard tracks:
 
 ---
 
-## 🤝 Contributing
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you'd like to change.
-
-```bash
-# Fork → Clone → Create branch → Commit → Push → Open PR
-git checkout -b feature/your-feature-name
-```
-
----
-
-## 📜 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🎤 Resume Highlight
-
-> *Built a sentiment-controlled text generation system using fine-tuned GPT-2 with ML reranking, an RLHF-lite feedback loop, evaluation metrics, and a live analytics dashboard — deployed via Streamlit.*
-
----
-
-<div align="center">
-
-**If you found this project useful, please consider giving it a ⭐ on GitHub — it means a lot!**
-
-Made with ❤️ using GPT-2 + Scikit-learn + Streamlit
-
-</div>
