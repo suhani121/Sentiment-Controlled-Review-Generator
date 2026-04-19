@@ -5,34 +5,53 @@ import pandas as pd
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from utils import (
     clean_text, feedback_score, save_feedback,
-    diversity, perplexity, load_feedback, get_feedback_stats
+    diversity, load_feedback, get_feedback_stats
 )
 
-# =========================
-# LOAD MODEL
-# =========================
-model_path = "model/gpt2_sentiment_model"
 
-tokenizer = GPT2Tokenizer.from_pretrained(model_path)
-model = GPT2LMHeadModel.from_pretrained(model_path)
+st.set_page_config(page_title="Sentiment Controlled Review Generator", layout="centered")
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
-model.eval()
 
-# =========================
+# SESSION STATE INIT
+if "result" not in st.session_state:
+    st.session_state.result = None
+if "result_sentiment" not in st.session_state:
+    st.session_state.result_sentiment = None
+if "feedback_msg" not in st.session_state:
+    st.session_state.feedback_msg = None
+
+
+# LOAD GPT-2 MODEL
+
+@st.cache_resource
+def load_gpt2():
+    model_path = "model/gpt2_sentiment_model"
+    tokenizer = GPT2Tokenizer.from_pretrained(model_path)
+    model = GPT2LMHeadModel.from_pretrained(model_path)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    model.eval()
+    return model, tokenizer, device
+
+model, tokenizer, device = load_gpt2()
+
+
 # LOAD SENTIMENT MODEL
-# =========================
-with open("model/sentiment_model.pkl", "rb") as f:
-    clf, vectorizer = pickle.load(f)
+
+@st.cache_resource
+def load_sentiment_model():
+    with open("model/sentiment_model.pkl", "rb") as f:
+        clf, vectorizer = pickle.load(f)
+    return clf, vectorizer
+
+clf, vectorizer = load_sentiment_model()
 
 def sentiment_score(text):
     vec = vectorizer.transform([text])
     return clf.predict_proba(vec)[0][1]
 
-# =========================
+
 # GENERATION FUNCTION
-# =========================
 def generate(prompt, sentiment):
     candidates = []
 
@@ -42,13 +61,14 @@ def generate(prompt, sentiment):
 
         output = model.generate(
             **inputs,
-            max_length=50,
+            max_length=100,
             do_sample=True,
             top_k=40,
             top_p=0.9,
             temperature=0.7,
             repetition_penalty=1.5,
-            no_repeat_ngram_size=3
+            no_repeat_ngram_size=3,
+            pad_token_id=tokenizer.eos_token_id  # BUG FIX: suppresses pad warning
         )
 
         text = tokenizer.decode(output[0], skip_special_tokens=True)
@@ -63,18 +83,16 @@ def generate(prompt, sentiment):
 
     return max(candidates, key=score)
 
-# =========================
+
 # UI TABS
-# =========================
-st.set_page_config(page_title="AI Review Generator", layout="centered")
 
 tab1, tab2 = st.tabs(["🎬 Generate", "📊 Analytics"])
 
-# =========================
+
 # TAB 1: GENERATION
-# =========================
+
 with tab1:
-    st.title("🎬 AI Movie Review Generator")
+    st.title("🎬 Sentiment Controlled Review Generator")
 
     sentiment = st.radio("Select Sentiment", ["positive", "negative"])
     user_input = st.text_input("Enter movie/topic", "This movie")
@@ -86,58 +104,68 @@ with tab1:
             else f"<negative> {user_input} was terrible because"
         )
 
-        result = generate(prompt, sentiment)
+        with st.spinner("Generating review..."):
+            result = generate(prompt, sentiment)
+
+        
+        st.session_state.result = result
+        st.session_state.result_sentiment = sentiment
+        st.session_state.feedback_msg = None  # reset old feedback message
+
+    
+    if st.session_state.result:
+        result = st.session_state.result
+        result_sentiment = st.session_state.result_sentiment
 
         st.success(result)
 
-        # Metrics
         st.subheader("📊 Metrics")
         st.write("Sentiment Score:", round(sentiment_score(result), 3))
         st.write("Diversity:", round(diversity(result), 3))
-        st.write("Perplexity:", round(perplexity(result, model, tokenizer, device), 2))
 
-        # Feedback
+        st.subheader("Was this review good?")
         col1, col2 = st.columns(2)
 
         with col1:
             if st.button("👍 Good"):
-                save_feedback(result, sentiment, 1)
-                st.success("Saved!")
+                save_feedback(result, result_sentiment, 1)
+                st.session_state.feedback_msg = "✅ Positive feedback saved!"
 
         with col2:
             if st.button("👎 Bad"):
-                save_feedback(result, sentiment, -1)
-                st.warning("Saved!")
+                save_feedback(result, result_sentiment, -1)
+                st.session_state.feedback_msg = "⚠️ Negative feedback saved!"
 
-# =========================
-# TAB 2: ANALYTICS
-# =========================
+        if st.session_state.feedback_msg:
+            st.info(st.session_state.feedback_msg)
+
+
 with tab2:
     st.title("📊 Analytics Dashboard")
 
     data = load_feedback()
 
     if len(data) == 0:
-        st.warning("No feedback yet!")
+        st.warning("No feedback yet! Generate some reviews and rate them.")
     else:
         df = pd.DataFrame(data)
-
         stats = get_feedback_stats()
 
-        # 🔥 KPIs
-        st.metric("Total Feedback", stats["total"])
-        st.metric("👍 Positive", stats["positive"])
-        st.metric("👎 Negative", stats["negative"])
+        # KPIs
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Feedback", stats["total"])
+        col2.metric("👍 Positive", stats["positive"])
+        col3.metric("👎 Negative", stats["negative"])
 
-        # 🔥 PIE CHART
+        # Sentiment Distribution
         st.subheader("Sentiment Distribution")
         st.bar_chart(df["sentiment"].value_counts())
 
-        # 🔥 FEEDBACK TREND
+        # Feedback Trend
         st.subheader("Feedback Trend")
         df["index"] = range(len(df))
-        st.line_chart(df["rating"])
+        st.line_chart(df.set_index("index")["rating"])
 
-        # 🔥 RAW DATA
+        # Recent Feedback Table
         st.subheader("Recent Feedback")
-        st.dataframe(df.tail(10))
+        st.dataframe(df[["text", "sentiment", "rating"]].tail(10))

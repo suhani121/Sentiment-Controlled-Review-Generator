@@ -1,5 +1,5 @@
 # ==========================================
-# GPT-2 + ML Sentiment Controlled Generator (FINAL FIXED + SAVING)
+# GPT-2 + ML Sentiment Controlled Generator
 # ==========================================
 
 import torch
@@ -17,12 +17,11 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
 
 # =========================
-# CREATE FOLDERS (IMPORTANT)
+# CREATE FOLDERS
 # =========================
-os.makedirs("model", exist_ok=True)
+os.makedirs("model/gpt2_sentiment_model", exist_ok=True)
 os.makedirs("feedback", exist_ok=True)
 
-# create empty feedback file if not exists
 if not os.path.exists("feedback/feedback.json"):
     with open("feedback/feedback.json", "w") as f:
         f.write("[]")
@@ -58,7 +57,7 @@ texts = [clean_text(x["text"]) for x in train_data]
 labels = [x["label"] for x in train_data]
 
 # =========================
-# TRAIN SENTIMENT MODEL
+# TRAIN SENTIMENT CLASSIFIER
 # =========================
 print("\nTraining sentiment classifier...")
 
@@ -72,16 +71,13 @@ def sentiment_score(sentence):
     vec = vectorizer.transform([sentence])
     return clf.predict_proba(vec)[0][1]
 
-# =========================
-# SAVE SENTIMENT MODEL 🔥
-# =========================
+# Save sentiment model
 with open("model/sentiment_model.pkl", "wb") as f:
     pickle.dump((clf, vectorizer), f)
-
 print("✅ sentiment_model.pkl saved")
 
 # =========================
-# ADD SENTIMENT TOKENS
+# ADD SENTIMENT TOKENS TO TEXT
 # =========================
 def add_sentiment(example):
     label = "positive" if example["label"] == 1 else "negative"
@@ -101,6 +97,7 @@ tokenizer.add_special_tokens({
     "additional_special_tokens": ["<positive>", "<negative>"]
 })
 
+# BUG FIX: pad_token must be set before tokenization to avoid warnings/errors
 tokenizer.pad_token = tokenizer.eos_token
 
 # =========================
@@ -125,7 +122,7 @@ tokenized_data.set_format(
 )
 
 # =========================
-# MODEL
+# LOAD GPT-2 MODEL
 # =========================
 print("\nLoading model...")
 model = GPT2LMHeadModel.from_pretrained(MODEL_NAME)
@@ -157,7 +154,18 @@ print("\nTraining started...\n")
 trainer.train()
 
 # =========================
-# GENERATION
+# BUG FIX: SAVE MODEL + TOKENIZER
+# =========================
+# The original code was MISSING this step entirely.
+# app.py loads from "model/gpt2_sentiment_model" but train.py
+# never saved there — so app.py would always crash on startup.
+print("\nSaving fine-tuned model and tokenizer...")
+model.save_pretrained("model/gpt2_sentiment_model")
+tokenizer.save_pretrained("model/gpt2_sentiment_model")
+print("✅ Model saved to model/gpt2_sentiment_model")
+
+# =========================
+# GENERATION (post-training test)
 # =========================
 def generate_with_sentiment(prompt, sentiment="positive"):
     candidates = []
@@ -183,14 +191,15 @@ def generate_with_sentiment(prompt, sentiment="positive"):
 
         output = model.generate(
             **inputs,
-            max_length=50,
+            max_length=100,
             do_sample=True,
             top_k=40,
             top_p=0.9,
             temperature=0.7,
             repetition_penalty=1.5,
             no_repeat_ngram_size=3,
-            bad_words_ids=bad_words
+            bad_words_ids=bad_words,
+            pad_token_id=tokenizer.eos_token_id  # BUG FIX: suppresses pad warning
         )
 
         text = tokenizer.decode(output[0], skip_special_tokens=True)
@@ -199,18 +208,16 @@ def generate_with_sentiment(prompt, sentiment="positive"):
 
     def score(text):
         s = sentiment_score(text)
-
         if sentiment == "positive" and s < 0.6:
             return -1
         if sentiment == "negative" and s > 0.4:
             return -1
-
         return s if sentiment == "positive" else (1 - s)
 
     best = max(candidates, key=score)
 
     if score(best) == -1:
-        return "Retry generation"
+        return "⚠️ Could not generate a confident review. Try again."
 
     return best
 
@@ -227,4 +234,4 @@ for _ in range(3):
 print("Negative Reviews:\n")
 for _ in range(3):
     print(generate_with_sentiment("<negative> This movie was terrible because", "negative"))
-   
+    print()
